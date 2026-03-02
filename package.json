@@ -1,0 +1,57 @@
+{
+  "name": "mira-bmad",
+  "version": "0.1.0",
+  "description": "Local visualization dashboard for BMAD projects — Epics, sprints, stories",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "bmad",
+    "bmad-method",
+    "bmad-enhanced",
+    "dashboard",
+    "epics",
+    "sprints",
+    "stories",
+    "kanban",
+    "local",
+    "visualization"
+  ],
+  "bin": {
+    "mira": "scripts/mira-serve.js",
+    "mira-install": "scripts/mira-install.js"
+  },
+  "scripts": {
+    "start": "node scripts/mira-serve.js",
+    "test": "node --test tests/",
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "fs-extra": "^11.0.0"
+  },
+  "devDependencies": {
+    "c8": "^10.0.0"
+  },
+  "peerDependencies": {
+    "bmad-method": ">=6.0.0"
+  },
+  "peerDependenciesMeta": {
+    "bmad-method": {
+      "optional": true
+    }
+  },
+  "files": [
+    "src/",
+    "scripts/",
+    "_bmad/",
+    "index.js",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Arnaud-octo/mira.git"
+  },
+  "license": "MIT"
+}

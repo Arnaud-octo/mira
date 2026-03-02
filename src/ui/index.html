@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mira — BMAD Board</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+
+  <!-- ── Header ─────────────────────────────────────────────────────────── -->
+  <header class="header">
+    <div class="header-left">
+      <span class="logo">🪩</span>
+      <span class="brand">Mira</span>
+      <span class="sep">/</span>
+      <span class="project-name" id="project-name">…</span>
+    </div>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="epics"  role="tab">Epics</button>
+      <button class="tab"        data-tab="board"  role="tab">Board</button>
+      <button class="tab"        data-tab="sprint" role="tab">Sprint</button>
+    </nav>
+
+    <div class="header-right">
+      <span class="progress-pill" id="meta-progress"></span>
+      <button class="btn-refresh" id="btn-refresh" title="Rafraîchir les données">↻</button>
+    </div>
+  </header>
+
+  <!-- ── Main content ──────────────────────────────────────────────────── -->
+  <main class="main">
+
+    <!-- Epics tab -->
+    <section id="tab-epics" class="tab-content active" role="tabpanel">
+      <div id="epics-list" class="epics-list"></div>
+    </section>
+
+    <!-- Board tab -->
+    <section id="tab-board" class="tab-content" role="tabpanel">
+      <div class="board-columns">
+        <div class="board-col">
+          <div class="col-header col-backlog">○ Backlog</div>
+          <div class="col-cards" id="col-backlog"></div>
+        </div>
+        <div class="board-col">
+          <div class="col-header col-ready">🔵 Ready for dev</div>
+          <div class="col-cards" id="col-ready"></div>
+        </div>
+        <div class="board-col">
+          <div class="col-header col-progress">🟡 In progress</div>
+          <div class="col-cards" id="col-in-progress"></div>
+        </div>
+        <div class="board-col">
+          <div class="col-header col-done">✅ Done</div>
+          <div class="col-cards" id="col-done"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sprint tab -->
+    <section id="tab-sprint" class="tab-content" role="tabpanel">
+      <div id="sprint-view"></div>
+    </section>
+
+  </main>
+
+  <!-- ── Story modal ────────────────────────────────────────────────────── -->
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-overlay" id="modal-overlay"></div>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <div>
+          <span class="modal-story-id" id="modal-story-id"></span>
+          <h2 class="modal-title" id="modal-title"></h2>
+        </div>
+        <div class="modal-header-actions">
+          <button class="btn-icon" id="btn-story-edit" title="Modifier la story">✏️</button>
+          <button class="modal-close" id="modal-close" aria-label="Fermer">✕</button>
+        </div>
+      </div>
+
+      <div class="modal-status-row">
+        <label class="modal-label">Statut</label>
+        <select class="status-select" id="modal-status">
+          <option value="backlog">○ Backlog</option>
+          <option value="ready-for-dev">🔵 Ready for dev</option>
+          <option value="in-progress">🟡 In progress</option>
+          <option value="done">✅ Done</option>
+        </select>
+        <span class="save-indicator" id="save-indicator"></span>
+      </div>
+
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- ── Epic edit modal ────────────────────────────────────────────────── -->
+  <div id="epic-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="epic-modal-title">
+    <div class="modal-overlay" id="epic-modal-overlay"></div>
+    <div class="modal-panel modal-panel-sm">
+      <div class="modal-header">
+        <div>
+          <span class="modal-story-id" id="epic-modal-id"></span>
+          <h2 class="modal-title" id="epic-modal-title">Modifier l'Epic</h2>
+        </div>
+        <button class="modal-close" id="epic-modal-close" aria-label="Fermer">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="edit-form">
+          <div class="edit-field">
+            <label class="edit-label" for="edit-epic-title">Titre</label>
+            <input class="edit-input" type="text" id="edit-epic-title" placeholder="Titre de l'epic" />
+          </div>
+          <div class="edit-field">
+            <label class="edit-label" for="edit-epic-objective">Objectif</label>
+            <textarea class="edit-textarea" id="edit-epic-objective" rows="3" placeholder="Objectif de l'epic"></textarea>
+          </div>
+          <div class="edit-actions">
+            <button class="btn-save" id="btn-epic-save">💾 Enregistrer</button>
+            <button class="btn-cancel" id="btn-epic-cancel">Annuler</button>
+            <span class="save-indicator" id="epic-save-indicator"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Toast notification ─────────────────────────────────────────────── -->
+  <div class="toast hidden" id="toast"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
