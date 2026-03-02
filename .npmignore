@@ -1,0 +1,8 @@
+tests/
+.github/
+coverage/
+eslint.config.js
+.eslintignore
+*.log
+.DS_Store
+CONTRIBUTING.md

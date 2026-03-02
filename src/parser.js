@@ -125,7 +125,7 @@ function parseEpicsContent(content) {
 
     // ── Story status: **Statut [Sprint N] :** value ─────────────────────────
     if (currentStory) {
-      const statusMatch = line.match(/^\*\*Statut(?:\s+Sprint\s+\d+)?\s*:\*\*\s*(.+)/);
+      const statusMatch = line.match(/^\*\*Statut[^:]*:\*\*\s*(.+)/);
       if (statusMatch) {
         currentStory.status = normalizeStatus(statusMatch[1]);
         continue;
@@ -159,11 +159,11 @@ function parseStoryFile(content) {
   if (statusMatch) result.status = normalizeStatus(statusMatch[1]);
 
   // ## Story → user story (as-a / I-want / so-that)
-  const storySection = content.match(/^## Story\s*\n+([\s\S]+?)(?=\n^##|\n^#[^#]|\Z)/m);
+  const storySection = content.match(/^## Story\s*\n+([\s\S]+?)(?=\n##|\n#[^#]|(?![\s\S]))/m);
   if (storySection) result.description = storySection[1].trim();
 
   // ## Acceptance Criteria → numbered list items
-  const acSection = content.match(/^## Acceptance Criteria\s*\n+([\s\S]+?)(?=\n^##|\n^#[^#]|\Z)/m);
+  const acSection = content.match(/^## Acceptance Criteria\s*\n+([\s\S]+?)(?=\n##|\n#[^#]|(?![\s\S]))/m);
   if (acSection) {
     result.ac = acSection[1]
       .split('\n')
@@ -173,7 +173,7 @@ function parseStoryFile(content) {
   }
 
   // ## Tasks / Subtasks → checkbox items (- [ ] or - [x])
-  const tasksSection = content.match(/^## Tasks[^\n]*\n+([\s\S]+?)(?=\n^##|\n^#[^#]|\Z)/m);
+  const tasksSection = content.match(/^## Tasks[^\n]*\n+([\s\S]+?)(?=\n##|\n#[^#]|(?![\s\S]))/m);
   if (tasksSection) {
     result.tasks = tasksSection[1]
       .split('\n')
@@ -187,7 +187,7 @@ function parseStoryFile(content) {
   }
 
   // ## Dev Notes → raw text block
-  const devSection = content.match(/^## Dev Notes\s*\n+([\s\S]+?)(?=\n^##|\n^#[^#]|\Z)/m);
+  const devSection = content.match(/^## Dev Notes\s*\n+([\s\S]+?)(?=\n##|\n#[^#]|(?![\s\S]))/m);
   if (devSection) result.devNotes = devSection[1].trim();
 
   return result;
@@ -374,7 +374,7 @@ function updateStatusInEpics(storyId, newStatus, epicsFile) {
 
   // Replace the **Statut ... :** line within this block only
   const newBlock = storyBlock.replace(
-    /\*\*Statut(?:\s+Sprint\s+\d+)?\s*:\*\*[^\n]+/,
+    /\*\*Statut[^:]*:\*\*[^\n]+/,
     `**Statut :** ${statusDisplay}`
   );
 
@@ -642,4 +642,8 @@ module.exports = {
   updateStoryContent,
   normalizeStatus,
   statusMeta,
+  // Exported for testing
+  parseEpicsContent,
+  parseStoryFile,
+  replaceSection,
 };

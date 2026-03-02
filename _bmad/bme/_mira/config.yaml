@@ -1,0 +1,9 @@
+# mira-bmad — Configuration
+# This file is optional. Mira works with sensible defaults.
+# Place this file in your project at _bmad/bme/_mira/config.yaml
+
+# Port for the local dashboard (default: 4242)
+port: 4242
+
+# Path to _bmad-output/ relative to project root (default: ./_bmad-output)
+# output_folder: ./_bmad-output

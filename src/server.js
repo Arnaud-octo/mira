@@ -57,7 +57,7 @@ function readBody(req) {
     req.on('data', chunk => { raw += chunk; });
     req.on('end',  () => {
       try { resolve(JSON.parse(raw)); }
-      catch (e) { reject(new Error('Invalid JSON body')); }
+      catch (_e) { reject(new Error('Invalid JSON body')); }
     });
     req.on('error', reject);
   });
@@ -93,7 +93,7 @@ function createHandler(outputDir) {
   }
 
   // Initial parse (best-effort — outputDir may not exist yet)
-  try { getProjectData(); } catch (_) { cache = { epics: [], sprints: [], currentSprint: null, meta: { totalStories: 0, doneStories: 0, projectName: '' } }; }
+  try { getProjectData(); } catch (_err) { cache = { epics: [], sprints: [], currentSprint: null, meta: { totalStories: 0, doneStories: 0, projectName: '' } }; }
 
   return async function handler(req, res) {
     const { method, url } = req;
