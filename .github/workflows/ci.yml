@@ -20,7 +20,7 @@ jobs:
       - run: npm run lint
 
   test:
-    name: Tests (Node ${{ matrix.node }})
+    name: Tests unitaires (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -33,6 +33,21 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+
+  test-integration:
+    name: Tests E2E (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run test:integration
 
   coverage:
     name: Coverage

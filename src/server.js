@@ -249,4 +249,4 @@ function startServer({ port = 4242, outputDir }) {
   });
 }
 
-module.exports = { startServer };
+module.exports = { startServer, createHandler };
