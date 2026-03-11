@@ -2,7 +2,7 @@
 
 /**
  * Unit tests — parser.js
- * Covers: normalizeStatus, statusMeta, parseEpicsContent, parseStoryFile, replaceSection
+ * Covers: normalizeStatus, statusMeta, parseEpicsContent, parseStoryFile, replaceSection, parseRetroFile
  */
 
 const { describe, it } = require('node:test');
@@ -13,6 +13,7 @@ const {
   statusMeta,
   parseEpicsContent,
   parseStoryFile,
+  parseRetroFile,
   replaceSection,
 } = require('../../src/parser');
 
@@ -256,5 +257,64 @@ describe('replaceSection', () => {
     const result = replaceSection(baseContent, '## Acceptance Criteria', newAc);
     assert.ok(result.includes('Nouveau critère'));
     assert.ok(!result.includes('Critère existant'));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// parseRetroFile
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('parseRetroFile', () => {
+  const sample = [
+    '# Sprint Rétrospective — Sprint 2',
+    '',
+    '**Date :** 2026-03-10',
+    '',
+    '## Ce qui a bien marché',
+    '',
+    '- Point positif A',
+    '- Point positif B',
+    '',
+    '## Ce qui peut être amélioré',
+    '',
+    '- Amélioration 1',
+    '',
+    '## Actions pour le prochain sprint',
+    '',
+    '- [ ] Action concrète 1',
+    '- [ ] Action concrète 2',
+  ].join('\n');
+
+  it('extrait le numéro de sprint', () => {
+    const r = parseRetroFile(sample);
+    assert.equal(r.sprintNumber, 2);
+  });
+
+  it('extrait la date', () => {
+    const r = parseRetroFile(sample);
+    assert.equal(r.date, '2026-03-10');
+  });
+
+  it('extrait wentWell', () => {
+    const r = parseRetroFile(sample);
+    assert.deepEqual(r.wentWell, ['Point positif A', 'Point positif B']);
+  });
+
+  it('extrait improve', () => {
+    const r = parseRetroFile(sample);
+    assert.deepEqual(r.improve, ['Amélioration 1']);
+  });
+
+  it('extrait les actions (checkbox)', () => {
+    const r = parseRetroFile(sample);
+    assert.deepEqual(r.actions, ['Action concrète 1', 'Action concrète 2']);
+  });
+
+  it('retourne des tableaux vides pour un fichier vide', () => {
+    const r = parseRetroFile('');
+    assert.equal(r.sprintNumber, 0);
+    assert.deepEqual(r.wentWell, []);
+    assert.deepEqual(r.improve, []);
+    assert.deepEqual(r.actions, []);
   });
 });

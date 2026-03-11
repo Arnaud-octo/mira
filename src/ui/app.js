@@ -17,10 +17,12 @@
 
 const state = {
   data: null,          // { epics, sprints, currentSprint, meta }
-  activeTab: 'epics',
+  activeTab: 'board',
   openStory: null,     // currently displayed story object
   openEpic: null,      // currently edited epic
   storyEditMode: false,// true when story modal is in edit mode
+  filterEpicId: null,  // active epic filter on Board tab (null = all)
+  pipeline: {},        // storyId → { phase, label } — active pipeline indicators
 };
 
 // ---------------------------------------------------------------------------
@@ -36,10 +38,12 @@ const $$ = sel => document.querySelectorAll(sel);
 
 /** Map canonical status → display label + CSS class */
 const STATUS = {
-  'done':          { label: '✅ Done',        css: 'done' },
-  'ready-for-dev': { label: '🔵 Ready',       css: 'ready' },
-  'in-progress':   { label: '🟡 In progress', css: 'in-progress' },
-  'backlog':       { label: '○ Backlog',      css: 'backlog' },
+  'done':          { label: '✅ Done',            css: 'done' },
+  'ready-for-dev': { label: '🔵 Ready for dev',   css: 'ready' },
+  'in-progress':   { label: '🟡 Dev in progress', css: 'in-progress' },
+  'review':        { label: '🟣 Review',          css: 'review' },
+  'qa':            { label: '🟠 QA',              css: 'qa' },
+  'backlog':       { label: '○ Backlog',          css: 'backlog' },
 };
 
 function statusBadge(status) {
@@ -50,6 +54,29 @@ function statusBadge(status) {
 function priorityBadge(priority) {
   const map = { high: '🔴 Haute', medium: '🟠 Moyenne', low: '🟡 Faible' };
   return `<span class="priority-badge ${priority}">${map[priority] || priority}</span>`;
+}
+
+// ---------------------------------------------------------------------------
+// VS Code file link helper
+// ---------------------------------------------------------------------------
+
+function vscodeLinkBtn(absolutePath) {
+  if (!absolutePath) return '';
+  const uri = 'vscode://file/' + absolutePath;
+  // Stop propagation so clicking the link doesn't open the modal/toggle
+  return `<a class="vscode-link" href="${uri}" title="Ouvrir dans VS Code" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></a>`;
+}
+
+function storyVscodePath(story) {
+  const outputDir = state.data && state.data.meta && state.data.meta.outputDir;
+  if (!outputDir || !story.file) return null;
+  return outputDir + '/' + story.file;
+}
+
+function epicVscodePath() {
+  const outputDir = state.data && state.data.meta && state.data.meta.outputDir;
+  if (!outputDir) return null;
+  return outputDir + '/planning-artifacts/epics.md';
 }
 
 // ---------------------------------------------------------------------------
@@ -88,7 +115,7 @@ function renderEpics(epics) {
       <tr class="story-row" data-story-id="${esc(story.id)}" tabindex="0" role="button" aria-label="Voir story ${esc(story.id)}">
         <td><span class="story-id-badge">${esc(story.id)}</span></td>
         <td>
-          <div>${esc(story.title)}</div>
+          <div>${esc(story.title)} ${vscodeLinkBtn(storyVscodePath(story))}</div>
           ${story.description ? `<div class="story-subtitle">${esc(story.description)}</div>` : ''}
         </td>
         <td>${statusBadge(story.status)}</td>
@@ -111,6 +138,7 @@ function renderEpics(epics) {
             </div>
             <span class="epic-progress-label">${done}/${total}</span>
             <button class="btn-icon btn-edit-epic" data-epic-id="${esc(epic.id)}" title="Modifier l'epic">✏️</button>
+            ${vscodeLinkBtn(epicVscodePath())}
             <span class="epic-chevron">›</span>
           </div>
         </div>
@@ -156,39 +184,118 @@ function renderEpics(epics) {
 // Render: Board tab
 // ---------------------------------------------------------------------------
 
+function renderBoardFilter(epics) {
+  // Remove previous filter bar if any
+  const existing = document.querySelector('.board-filter-bar');
+  if (existing) existing.remove();
+
+  const boardSection = $('tab-board');
+  const bar = document.createElement('div');
+  bar.className = 'board-filter-bar';
+
+  // "Tous" button
+  const allBtn = document.createElement('button');
+  allBtn.className = 'board-filter-pill' + (state.filterEpicId === null ? ' active' : '');
+  allBtn.textContent = 'Tous';
+  allBtn.addEventListener('click', () => {
+    state.filterEpicId = null;
+    renderBoard(state.data.epics);
+  });
+  bar.appendChild(allBtn);
+
+  // One pill per epic
+  for (const epic of epics) {
+    const hasStories = epic.stories.length > 0;
+    const btn = document.createElement('button');
+    btn.className = 'board-filter-pill' +
+      (state.filterEpicId === epic.id ? ' active' : '') +
+      (!hasStories ? ' disabled' : '');
+    btn.dataset.epicId = epic.id;
+    btn.textContent = `Epic ${epic.id}`;
+    btn.title = epic.title;
+    btn.disabled = !hasStories;
+    btn.addEventListener('click', () => {
+      state.filterEpicId = epic.id;
+      renderBoard(state.data.epics);
+    });
+    bar.appendChild(btn);
+  }
+
+  boardSection.insertBefore(bar, boardSection.firstChild);
+}
+
 function renderBoard(epics) {
+  renderBoardFilter(epics);
+
   const cols = {
     'backlog':       $('col-backlog'),
     'ready-for-dev': $('col-ready'),
     'in-progress':   $('col-in-progress'),
+    'review':        $('col-review'),
+    'qa':            $('col-qa'),
     'done':          $('col-done'),
   };
 
   // Clear
   Object.values(cols).forEach(c => { c.innerHTML = ''; });
 
-  const stories = allStories(epics);
-  if (!stories.length) {
+  const stories = allStories(epics).filter(s =>
+    state.filterEpicId === null || s.epicId === state.filterEpicId
+  );
+
+  if (!allStories(epics).length) {
     Object.values(cols).forEach(c => { c.innerHTML = '<div style="padding:10px;color:var(--c-text-3);font-size:12px">—</div>'; });
     return;
   }
+
+  // Drop zones
+  Object.entries(cols).forEach(([status, colEl]) => {
+    colEl.addEventListener('dragover', e => {
+      e.preventDefault();
+      colEl.classList.add('drag-over');
+    });
+    colEl.addEventListener('dragleave', () => colEl.classList.remove('drag-over'));
+    colEl.addEventListener('drop', async e => {
+      e.preventDefault();
+      colEl.classList.remove('drag-over');
+      const storyId = e.dataTransfer.getData('text/plain');
+      if (!storyId) return;
+      const story = findStory(state.data.epics, storyId);
+      if (!story || story.status === status) return;
+      await patchStoryStatus(storyId, status);
+    });
+  });
 
   for (const story of stories) {
     const col = cols[story.status] || cols['backlog'];
     const epic = epics.find(e => e.id === story.epicId);
 
     const card = document.createElement('div');
-    card.className = 'board-card';
+    const pl = state.pipeline[story.id];
+    card.className = 'board-card' + (pl && pl.phase === 'running' ? ' pipeline-running' : '');
     card.dataset.storyId = story.id;
     card.setAttribute('role', 'button');
     card.setAttribute('tabindex', '0');
+    card.setAttribute('draggable', 'true');
     card.innerHTML = `
-      <div class="board-card-id">${esc(story.id)}</div>
+      <div class="board-card-top">
+        <div class="board-card-id">${esc(story.id)}</div>
+        ${vscodeLinkBtn(storyVscodePath(story))}
+      </div>
       <div class="board-card-title">${esc(story.title)}</div>
       ${story.description ? `<div class="board-card-desc">${esc(story.description)}</div>` : ''}
       ${epic ? `<div class="board-card-epic">Epic ${esc(epic.id)}</div>` : ''}
+      ${pl ? `<div class="pipeline-indicator ${pl.phase}">
+        <span class="pipeline-dot"></span>
+        <span class="pipeline-label">${esc(pl.label)}</span>
+      </div>` : ''}
     `;
 
+    card.addEventListener('dragstart', e => {
+      e.dataTransfer.setData('text/plain', story.id);
+      card.classList.add('dragging');
+    });
+    card.addEventListener('dragend', () => card.classList.remove('dragging'));
     card.addEventListener('click', () => openModal(story));
     card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') openModal(story); });
     col.appendChild(card);
@@ -199,61 +306,217 @@ function renderBoard(epics) {
 // Render: Sprint tab
 // ---------------------------------------------------------------------------
 
-function renderSprint(currentSprint, epics) {
+function renderSprint(sprints, currentSprint, epics) {
   const container = $('sprint-view');
 
-  if (!currentSprint) {
+  if (!sprints || !sprints.length) {
     container.innerHTML = emptyState('Aucun sprint trouvé', 'Lance ton agent BMAD pour générer implementation-artifacts/sprint-N-planning-*.md');
     return;
   }
 
-  // Build a map of all stories for status lookup
   const storyMap = new Map(allStories(epics).map(s => [s.id, s]));
 
-  const rows = currentSprint.stories.map((ss, i) => {
-    // ss.ref = "5-2" → try to find as story "5.2"
-    const storyId = ss.ref.replace('-', '.');
-    const story   = storyMap.get(storyId);
-    const status  = story ? statusBadge(story.status) : '<span class="status-badge backlog">—</span>';
-    const clickable = story ? `data-story-id="${esc(storyId)}"` : '';
+  // Sprints sorted ascending for timeline (Sprint 1, Sprint 2, …)
+  const sorted = [...sprints].sort((a, b) => a.number - b.number);
+  const active = currentSprint || sorted[sorted.length - 1];
 
+  // Format date: "2026-03-04" → "4 mars 2026"
+  function fmtDate(d) {
+    if (!d) return '?';
+    const [y, m, day] = d.split('-');
+    const months = ['jan.','fév.','mars','avr.','mai','juin','juil.','août','sep.','oct.','nov.','déc.'];
+    return `${parseInt(day, 10)} ${months[parseInt(m, 10) - 1]} ${y}`;
+  }
+
+  // Render stories table for a given sprint
+  function storiesTable(sprint) {
+    if (!sprint.stories.length) return '<p style="padding:16px;color:var(--c-text-3)">Aucune story dans ce sprint.</p>';
+    const rows = sprint.stories.map((ss, i) => {
+      const storyId   = ss.ref.replace('-', '.');
+      const story     = storyMap.get(storyId);
+      const status    = story ? statusBadge(story.status) : '<span class="status-badge backlog">—</span>';
+      const clickable = story ? `data-story-id="${esc(storyId)}"` : '';
+      return `
+        <tr class="${story ? 'sprint-story-row' : ''}" ${clickable} tabindex="${story ? 0 : -1}">
+          <td style="width:32px;color:var(--c-text-3)">${i + 1}</td>
+          <td><strong style="font-family:var(--font-mono);font-size:11px;color:var(--c-text-2)">${esc(ss.ref)}</strong></td>
+          <td>${esc(ss.title)}</td>
+          <td>${priorityBadge(ss.priority)}</td>
+          <td>${status}</td>
+        </tr>
+      `;
+    }).join('');
     return `
-      <tr class="${story ? 'sprint-story-row' : ''}" ${clickable} tabindex="${story ? 0 : -1}">
-        <td style="width:32px;color:var(--c-text-3)">${i + 1}</td>
-        <td><strong style="font-family:var(--font-mono);font-size:11px;color:var(--c-text-2)">${esc(ss.ref)}</strong></td>
-        <td>${esc(ss.title)}</td>
-        <td>${priorityBadge(ss.priority)}</td>
-        <td>${status}</td>
-      </tr>
-    `;
-  }).join('');
-
-  container.innerHTML = `
-    <div class="sprint-header">
-      <div class="sprint-meta">
-        <span class="sprint-badge">Sprint ${currentSprint.number}</span>
-        ${currentSprint.date ? `<span class="sprint-date">${esc(currentSprint.date)}</span>` : ''}
-      </div>
-      ${currentSprint.goal ? `<div class="sprint-goal">"${esc(currentSprint.goal)}"</div>` : ''}
-    </div>
-
-    <div class="sprint-table-wrap">
       <table class="sprint-table">
         <thead>
           <tr>
-            <th>#</th>
-            <th>Ref</th>
-            <th>Story</th>
+            <th>#</th><th>Ref</th><th>Story</th>
             <th style="width:110px">Priorité</th>
             <th style="width:140px">Statut</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>
-    </div>
+    `;
+  }
+
+  // Render sprint detail card
+  function detailHtml(sprint) {
+    const dates = sprint.startDate
+      ? `<span class="sprint-date">${fmtDate(sprint.startDate)} → ${fmtDate(sprint.endDate)}</span>`
+      : (sprint.date ? `<span class="sprint-date">${esc(sprint.date)}</span>` : '');
+    const pct     = sprint.progress || 0;
+    const done    = sprint.doneStories  || 0;
+    const total   = sprint.totalStories || sprint.stories.length;
+    const statusLabel = sprint.sprintStatus === 'past'    ? '✅ Terminé'
+                      : sprint.sprintStatus === 'current' ? '🔵 En cours'
+                      : '🕐 À venir';
+    return `
+      <div class="sprint-header">
+        <div class="sprint-meta">
+          <span class="sprint-badge">Sprint ${sprint.number}</span>
+          ${dates}
+          <span class="sprint-lifecycle-badge ${sprint.sprintStatus || 'current'}">${statusLabel}</span>
+        </div>
+        ${sprint.goal ? `<div class="sprint-goal">"${esc(sprint.goal)}"</div>` : ''}
+        <div class="sprint-progress-wrap">
+          <div class="sprint-progress-bar">
+            <div class="sprint-progress-fill" style="width:${pct}%"></div>
+          </div>
+          <span class="sprint-progress-label">${pct}% — ${done}/${total} stories terminées</span>
+        </div>
+      </div>
+      <div class="sprint-table-wrap">
+        ${storiesTable(sprint)}
+      </div>
+    `;
+  }
+
+  // Sprint timeline cards
+  const timelineCards = sorted.map(sprint => {
+    const isCurrent = active && sprint.number === active.number;
+    const statusCls = sprint.sprintStatus || 'current';
+    const pct       = sprint.progress || 0;
+    const done      = sprint.doneStories  || 0;
+    const total     = sprint.totalStories || sprint.stories.length;
+    return `
+      <div class="sprint-tc ${statusCls}${isCurrent ? ' active' : ''}"
+           data-sprint-num="${sprint.number}" role="button" tabindex="0">
+        <div class="sprint-tc-top">
+          <span class="sprint-tc-num">Sprint ${sprint.number}</span>
+          <span class="sprint-tc-status ${statusCls}">
+            ${statusCls === 'past' ? '✅' : statusCls === 'current' ? '🔵' : '🕐'}
+          </span>
+        </div>
+        ${sprint.startDate ? `
+          <div class="sprint-tc-dates">${fmtDate(sprint.startDate)}<br>${fmtDate(sprint.endDate)}</div>
+        ` : ''}
+        <div class="sprint-tc-bar-wrap">
+          <div class="sprint-tc-bar">
+            <div class="sprint-tc-fill" style="width:${pct}%"></div>
+          </div>
+          <span class="sprint-tc-count">${done}/${total}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="sprint-timeline">${timelineCards}</div>
+    <div id="sprint-detail">${detailHtml(active)}</div>
   `;
 
   bindStoryRows(container);
+
+  // Click on timeline card → update detail panel
+  container.querySelectorAll('.sprint-tc').forEach(card => {
+    function activate() {
+      const num    = parseInt(card.dataset.sprintNum, 10);
+      const sprint = sprints.find(s => s.number === num);
+      if (!sprint) return;
+      container.querySelectorAll('.sprint-tc').forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+      const detail = $('sprint-detail');
+      detail.innerHTML = detailHtml(sprint);
+      bindStoryRows(detail);
+    }
+    card.addEventListener('click', activate);
+    card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') activate(); });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Render: Retro tab
+// ---------------------------------------------------------------------------
+
+function renderRetro(retros) {
+  const container = $('retro-view');
+
+  if (!retros || !retros.length) {
+    container.innerHTML = emptyState(
+      'Aucune rétrospective trouvée',
+      'Crée un fichier sprint-{N}-retro-{date}.md dans implementation-artifacts/'
+    );
+    return;
+  }
+
+  const retro = retros[0]; // most recent first
+
+  const selectorHtml = retros.length > 1
+    ? `<div class="retro-selector">
+        ${retros.map((r, i) => `
+          <button class="retro-selector-btn${i === 0 ? ' active' : ''}" data-retro-idx="${i}">
+            Sprint ${r.sprintNumber}
+          </button>
+        `).join('')}
+       </div>`
+    : '';
+
+  function retroHtml(r) {
+    function listSection(title, items) {
+      if (!items.length) return '';
+      return `
+        <div class="retro-section">
+          <div class="retro-section-title">${esc(title)}</div>
+          <ul class="retro-list">
+            ${items.map(item => `<li>${esc(item)}</li>`).join('')}
+          </ul>
+        </div>
+      `;
+    }
+    return `
+      <div class="retro-header">
+        <span class="sprint-badge">Sprint ${r.sprintNumber}</span>
+        ${r.date ? `<span class="sprint-date">${esc(r.date)}</span>` : ''}
+      </div>
+      <div class="retro-body">
+        ${listSection('Ce qui a bien marché ✅', r.wentWell)}
+        ${listSection('Ce qui peut être amélioré 🔧', r.improve)}
+        ${listSection('Actions pour le prochain sprint 🎯', r.actions)}
+        ${!r.wentWell.length && !r.improve.length && !r.actions.length
+          ? `<p style="color:var(--c-text-3);font-size:13px">Fichier vide ou format non reconnu.</p>`
+          : ''}
+      </div>
+    `;
+  }
+
+  container.innerHTML = `
+    ${selectorHtml}
+    <div class="retro-card" id="retro-content">
+      ${retroHtml(retro)}
+    </div>
+  `;
+
+  // Selector buttons (only when multiple retros exist)
+  if (retros.length > 1) {
+    container.querySelectorAll('.retro-selector-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        container.querySelectorAll('.retro-selector-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        $('retro-content').innerHTML = retroHtml(retros[parseInt(btn.dataset.retroIdx, 10)]);
+      });
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -262,7 +525,18 @@ function renderSprint(currentSprint, epics) {
 
 function renderMeta(meta) {
   $('project-name').textContent = meta.projectName || '—';
-  $('meta-progress').textContent = `${meta.doneStories}/${meta.totalStories} done`;
+  const pill = $('meta-progress');
+  if (!meta.totalStories) {
+    pill.innerHTML = '<span class="progress-pill-text">—</span>';
+    return;
+  }
+  const pct = Math.round((meta.doneStories / meta.totalStories) * 100);
+  pill.innerHTML = `
+    <div class="progress-pill-bar-wrap" title="${meta.doneStories}/${meta.totalStories} stories terminées">
+      <div class="progress-pill-bar" style="width:${pct}%"></div>
+    </div>
+    <span class="progress-pill-text">${pct}%&thinsp;<span class="progress-pill-count">${meta.doneStories}/${meta.totalStories}</span></span>
+  `;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,16 +546,21 @@ function renderMeta(meta) {
 function renderAll(data) {
   state.data = data;
   renderMeta(data.meta);
+  // Show retro tab only when retros exist
+  const retroBtn = $('tab-btn-retro');
+  if (retroBtn) retroBtn.style.display = (data.retros && data.retros.length) ? '' : 'none';
   if (state.activeTab === 'epics')  renderEpics(data.epics);
   if (state.activeTab === 'board')  renderBoard(data.epics);
-  if (state.activeTab === 'sprint') renderSprint(data.currentSprint, data.epics);
+  if (state.activeTab === 'sprint') renderSprint(data.sprints, data.currentSprint, data.epics);
+  if (state.activeTab === 'retro')  renderRetro(data.retros);
 }
 
 function renderCurrentTab() {
   if (!state.data) return;
   if (state.activeTab === 'epics')  renderEpics(state.data.epics);
   if (state.activeTab === 'board')  renderBoard(state.data.epics);
-  if (state.activeTab === 'sprint') renderSprint(state.data.currentSprint, state.data.epics);
+  if (state.activeTab === 'sprint') renderSprint(state.data.sprints, state.data.currentSprint, state.data.epics);
+  if (state.activeTab === 'retro')  renderRetro(state.data.retros);
 }
 
 // ---------------------------------------------------------------------------
@@ -699,6 +978,105 @@ function emptyState(title, desc) {
 }
 
 // ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+function renderSearchResults(query) {
+  const results = $('search-results');
+  if (!query || !state.data) {
+    results.classList.add('hidden');
+    results.innerHTML = '';
+    return;
+  }
+
+  const q = query.toLowerCase();
+  const matches = [];
+
+  for (const epic of state.data.epics) {
+    // Epic match
+    const epicMatch =
+      epic.title.toLowerCase().includes(q) ||
+      (epic.objective && epic.objective.toLowerCase().includes(q));
+
+    for (const story of epic.stories) {
+      const storyMatch =
+        story.title.toLowerCase().includes(q) ||
+        (story.description && story.description.toLowerCase().includes(q));
+
+      if (storyMatch || epicMatch) {
+        matches.push({ story, epic });
+      }
+    }
+  }
+
+  if (!matches.length) {
+    results.innerHTML = '<div class="search-empty">Aucun résultat</div>';
+    results.classList.remove('hidden');
+    return;
+  }
+
+  results.innerHTML = matches.map(({ story, epic }) => `
+    <div class="search-item" data-story-id="${esc(story.id)}" role="option" tabindex="0">
+      <div class="search-item-top">
+        <span class="search-item-id">${esc(story.id)}</span>
+        <span class="search-item-title">${highlight(story.title, q)}</span>
+      </div>
+      <div class="search-item-meta">
+        <span class="search-item-epic">Epic ${esc(epic.id)} — ${esc(epic.title)}</span>
+        ${statusBadge(story.status)}
+      </div>
+    </div>
+  `).join('');
+
+  results.querySelectorAll('.search-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const story = findStory(state.data.epics, el.dataset.storyId);
+      if (story) {
+        closeSearch();
+        openModal(story);
+      }
+    });
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        el.click();
+      }
+    });
+  });
+
+  results.classList.remove('hidden');
+}
+
+function highlight(text, query) {
+  const escaped = esc(text);
+  const escapedQuery = esc(query);
+  const re = new RegExp(`(${escapedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  return escaped.replace(re, '<mark>$1</mark>');
+}
+
+function closeSearch() {
+  $('search-input').value = '';
+  $('search-results').classList.add('hidden');
+  $('search-results').innerHTML = '';
+}
+
+function bindSearch() {
+  const input = $('search-input');
+  const wrap  = $('search-wrap');
+
+  input.addEventListener('input', () => renderSearchResults(input.value.trim()));
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeSearch();
+  });
+
+  // Close when clicking outside
+  document.addEventListener('click', e => {
+    if (!wrap.contains(e.target)) closeSearch();
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Event bindings
 // ---------------------------------------------------------------------------
 
@@ -711,6 +1089,9 @@ function bindEvents() {
 
       const tabId = btn.dataset.tab;
       state.activeTab = tabId;
+
+      // Reset board filter when leaving the board tab
+      if (tabId !== 'board') state.filterEpicId = null;
 
       $$('.tab-content').forEach(c => c.classList.remove('active'));
       $(`tab-${tabId}`).classList.add('active');
@@ -752,10 +1133,42 @@ function bindEvents() {
   // Close on Escape (both modals)
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
+      closeSearch();
       closeModal();
       closeEpicModal();
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// SSE — file watcher auto-refresh
+// ---------------------------------------------------------------------------
+
+function connectEventSource() {
+  const evtSource = new EventSource('/api/events');
+
+  evtSource.onmessage = async () => {
+    await fetchData('/api/refresh');
+    showToast('↻ Mis à jour');
+  };
+
+  // Pipeline visual feedback (named SSE event)
+  evtSource.addEventListener('pipeline', e => {
+    const d = JSON.parse(e.data);
+    if (d.phase === 'done' || d.phase === 'error') {
+      delete state.pipeline[d.storyId];
+    } else {
+      state.pipeline[d.storyId] = { phase: d.phase, label: d.label || d.step || '…' };
+    }
+    // Refresh board immediately without a full data refetch
+    if (state.activeTab === 'board' && state.data) renderBoard(state.data.epics);
+  });
+
+  // Reconnect silently if the server restarts
+  evtSource.onerror = () => {
+    evtSource.close();
+    setTimeout(connectEventSource, 3000);
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -764,5 +1177,7 @@ function bindEvents() {
 
 document.addEventListener('DOMContentLoaded', () => {
   bindEvents();
+  bindSearch();
   fetchData();
+  connectEventSource();
 });

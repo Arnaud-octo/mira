@@ -46,6 +46,8 @@ function normalizeStatus(raw) {
   if (s.includes('done') || s.includes('✅')) return 'done';
   if (s.includes('ready-for-dev') || s.includes('ready for dev')) return 'ready-for-dev';
   if (s.includes('in-progress') || s.includes('in progress')) return 'in-progress';
+  if (s.includes('review')) return 'review';
+  if (s.includes('qa')) return 'qa';
   return 'backlog';
 }
 
@@ -57,10 +59,12 @@ function normalizeStatus(raw) {
  */
 function statusMeta(status) {
   switch (status) {
-    case 'done':          return { label: '✅ Done',          css: 'done' };
-    case 'ready-for-dev': return { label: '🔵 Ready',         css: 'ready' };
-    case 'in-progress':   return { label: '🟡 In Progress',   css: 'in-progress' };
-    default:              return { label: '○ Backlog',        css: 'backlog' };
+    case 'done':          return { label: '✅ Done',            css: 'done' };
+    case 'ready-for-dev': return { label: '🔵 Ready for dev',  css: 'ready' };
+    case 'in-progress':   return { label: '🟡 Dev in progress',css: 'in-progress' };
+    case 'review':        return { label: '🟣 Review',         css: 'review' };
+    case 'qa':            return { label: '🟠 QA',             css: 'qa' };
+    default:              return { label: '○ Backlog',         css: 'backlog' };
   }
 }
 
@@ -271,8 +275,104 @@ function parseSprints(implDir) {
       });
     }
 
+    // Duration (e.g. "1 semaine" → 7 days, "2 semaines" → 14 days)
+    const durMatch = content.match(/^\*\*Dur[eé]e\s*:\*\*\s*(\d+)\s*(semaine|jour|week|day)/im);
+    sprint.durationDays = durMatch
+      ? parseInt(durMatch[1], 10) * (/semaine|week/i.test(durMatch[2]) ? 7 : 1)
+      : 14;
+
+    // Compute date range from planning date + duration
+    sprint.startDate = sprint.date || null;
+    if (sprint.startDate) {
+      const end = new Date(sprint.startDate);
+      end.setDate(end.getDate() + sprint.durationDays - 1);
+      sprint.endDate = end.toISOString().slice(0, 10);
+    } else {
+      sprint.endDate = null;
+    }
+
     return sprint;
   }).filter(s => s.number > 0);
+}
+
+// ---------------------------------------------------------------------------
+// Retro parsing (sprint-{N}-retro-*.md)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a single retro file content.
+ *
+ * @param {string} content
+ * @returns {{ sprintNumber: number, date: string, wentWell: string[], improve: string[], actions: string[] }}
+ */
+function parseRetroFile(content) {
+  const result = { sprintNumber: 0, date: '', wentWell: [], improve: [], actions: [] };
+
+  const numMatch = content.match(/^#\s+Sprint\s+R[ée]trospective\s*[—–-]\s*Sprint\s*(\d+)/im);
+  if (numMatch) result.sprintNumber = parseInt(numMatch[1], 10);
+
+  const dateMatch = content.match(/^\*\*Date\s*:\*\*\s*(.+)$/m);
+  if (dateMatch) result.date = dateMatch[1].trim();
+
+  // Map section heading keywords → result key
+  const SECTION_KEYS = [
+    { re: /bien\s+march/i,      key: 'wentWell' },
+    { re: /am[eé]lior/i,        key: 'improve'  },
+    { re: /actions\s+pour/i,    key: 'actions'  },
+  ];
+
+  function parseListItems(lines) {
+    return lines
+      .filter(l => /^[-*]\s/.test(l.trim()) || /^\d+\.\s/.test(l.trim()))
+      .map(l => l.trim()
+        .replace(/^- \[[ x]\]\s*/i, '') // strip checkbox first
+        .replace(/^[-*]\s*/, '')
+        .replace(/^\d+\.\s*/, '')
+        .trim()
+      )
+      .filter(Boolean);
+  }
+
+  // Line-by-line section scan (avoids multiline regex $ issues)
+  let currentKey = null;
+  let sectionLines = [];
+
+  for (const line of content.split('\n')) {
+    if (/^## /.test(line)) {
+      if (currentKey) result[currentKey] = parseListItems(sectionLines);
+      sectionLines = [];
+      currentKey = null;
+      for (const { re, key } of SECTION_KEYS) {
+        if (re.test(line)) { currentKey = key; break; }
+      }
+      continue;
+    }
+    if (currentKey) sectionLines.push(line);
+  }
+  if (currentKey) result[currentKey] = parseListItems(sectionLines);
+
+  return result;
+}
+
+/**
+ * Parse all retro files in implementation-artifacts/.
+ * Files matched: sprint-{N}-retro-*.md
+ *
+ * @param {string} implDir
+ * @returns {Retro[]}  — sorted by sprint number descending (latest first)
+ */
+function parseRetros(implDir) {
+  if (!fs.existsSync(implDir)) return [];
+
+  return fs.readdirSync(implDir)
+    .filter(f => /^sprint-\d+-retro-/.test(f))
+    .sort()
+    .reverse()
+    .map(filename => {
+      const content = fs.readFileSync(path.join(implDir, filename), 'utf8');
+      return { ...parseRetroFile(content), file: filename };
+    })
+    .filter(r => r.sprintNumber > 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -316,30 +416,56 @@ function parseProject(outputDir) {
     }
   }
 
+  // ── Retros ────────────────────────────────────────────────────────────────
+  const retros = parseRetros(implDir);
+
   // ── Sprints ───────────────────────────────────────────────────────────────
   const sprints = parseSprints(implDir);
-  const currentSprint = sprints.length > 0 ? sprints[0] : null;
 
-  // Enrich sprint stories with actual status from parsed epics
-  if (currentSprint) {
-    const storyMap = new Map();
-    for (const epic of epics) {
-      for (const story of epic.stories) storyMap.set(story.id, story);
-    }
-    for (const ss of currentSprint.stories) {
-      // ss.ref looks like "5-2" → story id "5.2"
+  // Enrich ALL sprint stories with actual status + compute lifecycle stats
+  const storyMapForSprints = new Map();
+  for (const epic of epics) {
+    for (const story of epic.stories) storyMapForSprints.set(story.id, story);
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  for (const sprint of sprints) {
+    for (const ss of sprint.stories) {
       const id = ss.ref.replace('-', '.');
-      const story = storyMap.get(id);
+      const story = storyMapForSprints.get(id);
       if (story) ss.status = story.status;
     }
+    const total = sprint.stories.length;
+    const done  = sprint.stories.filter(s => s.status === 'done').length;
+    sprint.totalStories = total;
+    sprint.doneStories  = done;
+    sprint.progress     = total > 0 ? Math.round((done / total) * 100) : 0;
+
+    // Lifecycle: past | current | upcoming
+    if (sprint.startDate && sprint.endDate) {
+      if (sprint.endDate < today && done === total) {
+        sprint.sprintStatus = 'past';
+      } else if (sprint.startDate <= today) {
+        sprint.sprintStatus = 'current';
+      } else {
+        sprint.sprintStatus = 'upcoming';
+      }
+    } else {
+      sprint.sprintStatus = 'current';
+    }
   }
+
+  // currentSprint: prefer a running sprint, then next upcoming, then latest
+  const currentSprint =
+    sprints.find(s => s.sprintStatus === 'current')  ||
+    sprints.find(s => s.sprintStatus === 'upcoming') ||
+    (sprints.length > 0 ? sprints[0] : null);
 
   // ── Meta ─────────────────────────────────────────────────────────────────
   const totalStories = epics.reduce((n, e) => n + e.stories.length, 0);
   const doneStories  = epics.reduce((n, e) => n + e.stories.filter(s => s.status === 'done').length, 0);
   const projectName  = path.basename(path.dirname(outputDir));
 
-  return { epics, sprints, currentSprint, meta: { totalStories, doneStories, projectName } };
+  return { epics, sprints, currentSprint, retros, meta: { totalStories, doneStories, projectName } };
 }
 
 // ---------------------------------------------------------------------------
@@ -645,5 +771,6 @@ module.exports = {
   // Exported for testing
   parseEpicsContent,
   parseStoryFile,
+  parseRetroFile,
   replaceSection,
 };

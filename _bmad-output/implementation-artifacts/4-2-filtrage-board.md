@@ -1,6 +1,6 @@
 # Story 4.2: Filtrage par Epic sur le Board
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 

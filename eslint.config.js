@@ -11,9 +11,10 @@ const nodeGlobals = {
   process:      'readonly',
   console:      'readonly',
   Buffer:       'readonly',
-  setTimeout:   'readonly',
-  clearTimeout: 'readonly',
-  URL:          'readonly',
+  setTimeout:    'readonly',
+  clearTimeout:  'readonly',
+  setImmediate:  'readonly',
+  URL:           'readonly',
 };
 
 const testGlobals = {
@@ -36,7 +37,7 @@ module.exports = [
 
   // Source files — Node.js (server, parser, scripts)
   {
-    files: ['src/server.js', 'src/parser.js', 'scripts/**/*.js', 'index.js'],
+    files: ['src/server.js', 'src/parser.js', 'src/bmad-pipeline.js', 'scripts/**/*.js', 'index.js'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType:  'commonjs',
@@ -63,6 +64,7 @@ module.exports = [
         setTimeout:   'readonly',
         clearTimeout: 'readonly',
         console:      'readonly',
+        EventSource:  'readonly',
       },
     },
     rules: {

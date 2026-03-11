@@ -8,6 +8,7 @@
  * API:
  *   GET  /api/data          → { epics, sprints, currentSprint, meta }
  *   GET  /api/refresh       → re-parse files and return fresh data
+ *   GET  /api/events        → SSE stream — emits "refresh" when .md files change
  *   PATCH /api/story        → { id, status } → updates Markdown files on disk
  */
 
@@ -18,6 +19,68 @@ const fs   = require('fs');
 const path = require('path');
 
 const { parseProject, updateStoryStatus, updateEpic, updateStoryContent } = require('./parser');
+const { runPipeline } = require('./bmad-pipeline');
+
+// ---------------------------------------------------------------------------
+// BMAD workflow hints — printed to terminal on status transitions
+// ---------------------------------------------------------------------------
+
+const BMAD_HINTS = {
+  'backlog->ready-for-dev': (story) => [
+    `\n📋  Story ${story.id} — "${story.title}"`,
+    `    Statut : backlog → 🔵 ready-for-dev`,
+    ``,
+    `    ▶  Lance l'agent BMAD SM pour affiner la story :`,
+    `       @sm "Affiner et préparer la story ${story.id} pour le développement"`,
+    ``,
+  ],
+  'ready-for-dev->in-progress': (story) => [
+    `\n🛠   Story ${story.id} — "${story.title}"`,
+    `    Statut : ready-for-dev → 🟡 dev in progress`,
+    ``,
+    `    ▶  Lance l'agent BMAD Dev pour implémenter la story :`,
+    `       @dev "Implémenter la story ${story.id} : ${story.title}"`,
+    ``,
+  ],
+  'in-progress->review': (story) => [
+    `\n🔍  Story ${story.id} — "${story.title}"`,
+    `    Statut : dev in progress → 🟣 review`,
+    ``,
+    `    ▶  Lance l'agent BMAD pour la code review :`,
+    `       @reviewer "Code review de la story ${story.id} : ${story.title}"`,
+    ``,
+  ],
+  'review->qa': (story) => [
+    `\n🧪  Story ${story.id} — "${story.title}"`,
+    `    Statut : review → 🟠 QA`,
+    ``,
+    `    ▶  Lance l'agent BMAD QA pour valider la story :`,
+    `       @qa "Valider la story ${story.id} : ${story.title}"`,
+    ``,
+  ],
+  'qa->done': (story) => [
+    `\n✅  Story ${story.id} — "${story.title}"`,
+    `    Statut : QA → ✅ done`,
+    ``,
+    `    Story livrée. Pense à mettre à jour le sprint planning si nécessaire.`,
+    ``,
+  ],
+};
+
+function printBmadHint(fromStatus, toStatus, story) {
+  const key = `${fromStatus}->${toStatus}`;
+  const hint = BMAD_HINTS[key];
+  if (!hint) return;
+  const chalk = require('chalk');
+  const lines = hint(story);
+  const colored = lines.map(l => {
+    if (l.includes('▶')) return chalk.cyan(l);
+    if (l.includes('@')) return chalk.yellow(l);
+    if (l.startsWith('\n')) return chalk.bold(l);
+    return chalk.gray(l);
+  });
+  console.log(colored.join('\n'));
+}
 
 // ---------------------------------------------------------------------------
 // MIME types for static file serving
@@ -80,12 +143,62 @@ function serveStatic(res, filePath) {
 }
 
 // ---------------------------------------------------------------------------
+// SSE: connected clients registry
+// ---------------------------------------------------------------------------
+
+const sseClients = new Set();
+
+function broadcastRefresh() {
+  for (const res of sseClients) {
+    try { res.write('data: refresh\n\n'); } catch (_) { sseClients.delete(res); }
+  }
+}
+
+function broadcastPipeline(data) {
+  const payload = JSON.stringify(data);
+  for (const res of sseClients) {
+    try { res.write(`event: pipeline\ndata: ${payload}\n\n`); } catch (_) { sseClients.delete(res); }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// File watcher (fs.watch with 300ms debounce, macOS-safe)
+// ---------------------------------------------------------------------------
+
+/**
+ * Watch _bmad-output/ for .md changes and broadcast SSE refresh events.
+ * Returns a cleanup function.
+ *
+ * @param {string} outputDir
+ * @returns {() => void}
+ */
+function startWatcher(outputDir) {
+  if (!fs.existsSync(outputDir)) return () => {};
+
+  let debounceTimer = null;
+
+  const watcher = fs.watch(outputDir, { recursive: true }, (_eventType, filename) => {
+    if (!filename || !filename.endsWith('.md')) return;
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(broadcastRefresh, 300);
+  });
+
+  watcher.on('error', () => {}); // ignore watcher errors silently
+
+  return () => {
+    clearTimeout(debounceTimer);
+    watcher.close();
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Request handler factory
 // ---------------------------------------------------------------------------
 
 function createHandler(outputDir) {
   // Parse once at startup; individual requests can trigger a refresh
   let cache = null;
+  const runningPipelines = new Set(); // storyIds currently being processed
 
   function getProjectData() {
     cache = parseProject(outputDir);
@@ -108,10 +221,24 @@ function createHandler(outputDir) {
     if (url === '/api/data' && method === 'GET') {
       try {
         const data = getProjectData();
+        data.meta.outputDir = outputDir;
         return json(res, 200, data);
       } catch (err) {
         return json(res, 500, { error: err.message });
       }
+    }
+
+    // ── API: GET /api/events (SSE) ──────────────────────────────────────────
+    if (url === '/api/events' && method === 'GET') {
+      res.writeHead(200, {
+        'Content-Type':  'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection':    'keep-alive',
+      });
+      res.write(': connected\n\n'); // initial comment to open the stream
+      sseClients.add(res);
+      req.on('close', () => sseClients.delete(res));
+      return; // keep connection open
     }
 
     // ── API: GET /api/refresh ───────────────────────────────────────────────
@@ -155,11 +282,59 @@ function createHandler(outputDir) {
 
         // Status update
         if (status !== undefined) {
-          const allowed = ['backlog', 'ready-for-dev', 'in-progress', 'done'];
+          const allowed = ['backlog', 'ready-for-dev', 'in-progress', 'review', 'qa', 'done'];
           if (!allowed.includes(status)) {
             return json(res, 400, { error: `status must be one of: ${allowed.join(', ')}` });
           }
+          // Capture previous status for BMAD workflow hint
+          const prevData = cache;
+          let prevStory = null;
+          if (prevData) {
+            for (const epic of prevData.epics) {
+              const found = epic.stories.find(s => s.id === id);
+              if (found) { prevStory = found; break; }
+            }
+          }
+          const prevStatus = prevStory ? prevStory.status : null;
+
           updateStoryStatus(id, status, outputDir);
+
+          // Print BMAD workflow hint in terminal
+          if (prevStory && prevStatus && prevStatus !== status) {
+            printBmadHint(prevStatus, status, prevStory);
+          }
+
+          // Auto-pipeline : lance le pipeline complet si la story passe en in-progress
+          if (status === 'in-progress' && prevStory && prevStatus !== 'in-progress') {
+            if (runningPipelines.has(id)) {
+              console.log(`⚠️  Pipeline déjà en cours pour story ${id} — ignoré.`);
+            } else {
+              const projectRoot = path.dirname(outputDir);
+              const implDir     = path.join(outputDir, 'implementation-artifacts');
+              const storyPrefix = id.replace('.', '-') + '-';
+              const storyFile   = require('fs').readdirSync(implDir).find(f => f.startsWith(storyPrefix) && f.endsWith('.md'));
+              const storyFilePath = storyFile ? path.join(implDir, storyFile) : null;
+
+              runningPipelines.add(id);
+              setImmediate(() => {
+                runPipeline({
+                  storyId:       id,
+                  storyTitle:    prevStory.title,
+                  storyFilePath: storyFilePath || path.join(implDir, storyPrefix + 'story.md'),
+                  projectRoot,
+                  outputDir,
+                  updateStatus: (sid, s, dir) => {
+                    updateStoryStatus(sid, s, dir);
+                    cache = parseProject(dir);
+                    broadcastRefresh();
+                  },
+                  broadcast:         broadcastRefresh,
+                  broadcastPipeline: broadcastPipeline,
+                  log:               console.log,
+                }).finally(() => runningPipelines.delete(id));
+              });
+            }
+          }
         }
 
         // Content update (title, description, ac, devNotes)
@@ -214,18 +389,22 @@ function openBrowser(url) {
 /**
  * Start the Mira HTTP server.
  *
- * @param {{ port: number, outputDir: string }} options
+ * @param {{ port: number, outputDir: string, watchMode?: boolean }} options
  */
-function startServer({ port = 4242, outputDir }) {
+function startServer({ port = 4242, outputDir, watchMode = false }) {
   const chalk = require('chalk');
   const handler = createHandler(outputDir);
   const server  = http.createServer(handler);
+
+  let stopWatcher = () => {};
+  if (watchMode) stopWatcher = startWatcher(outputDir);
 
   server.listen(port, '127.0.0.1', () => {
     const url = `http://localhost:${port}`;
     console.log(chalk.bold('\n🪩  Mira\n'));
     console.log(chalk.green('  ✅ Dashboard →'), chalk.cyan.underline(url));
     console.log(chalk.gray('  📂 Artifacts →'), chalk.gray(outputDir));
+    if (watchMode) console.log(chalk.gray('  👁  Watch mode →'), chalk.gray('actif'));
     console.log(chalk.gray('\n  Ctrl+C pour arrêter\n'));
     openBrowser(url);
   });
@@ -245,6 +424,7 @@ function startServer({ port = 4242, outputDir }) {
   process.on('SIGINT', () => {
     const chalk = require('chalk');
     console.log(chalk.gray('\n  Mira arrêté.\n'));
+    stopWatcher();
     server.close(() => process.exit(0));
   });
 }

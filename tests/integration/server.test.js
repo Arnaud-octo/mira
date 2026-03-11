@@ -400,3 +400,24 @@ describe('CORS', () => {
     }
   });
 });
+
+// ── Retros ────────────────────────────────────────────────────────────────────
+
+describe('GET /api/data — retros', () => {
+  it('retros est un tableau dans la réponse', async () => {
+    const { status, body } = await get('/api/data');
+    assert.equal(status, 200);
+    assert.ok(Array.isArray(body.retros), 'retros should be an array');
+  });
+
+  it('retros contient la fixture sprint-1-retro', async () => {
+    const { body } = await get('/api/data');
+    assert.ok(body.retros.length >= 1, 'at least one retro expected');
+    const retro = body.retros[0];
+    assert.equal(retro.sprintNumber, 1);
+    assert.equal(retro.date, '2026-03-07');
+    assert.ok(retro.wentWell.length >= 1);
+    assert.ok(retro.improve.length >= 1);
+    assert.ok(retro.actions.length >= 1);
+  });
+});

@@ -1,6 +1,6 @@
 # Story 4.1: Vue rétrospective de sprint
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 

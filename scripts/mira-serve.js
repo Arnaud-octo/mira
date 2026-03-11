@@ -41,6 +41,8 @@ if (fs.existsSync(configPath)) {
 const portArg = flag('--port');
 const port = portArg ? parseInt(portArg, 10) : configPort;
 
+const watchMode = args.includes('--watch');
+
 // Warn if no _bmad-output found
 if (!fs.existsSync(outputDir)) {
   console.log(chalk.yellow(`\n⚠️  Dossier _bmad-output introuvable : ${outputDir}`));
@@ -50,4 +52,4 @@ if (!fs.existsSync(outputDir)) {
 
 // Start server
 const { startServer } = require('../src/server');
-startServer({ port, outputDir });
+startServer({ port, outputDir, watchMode });

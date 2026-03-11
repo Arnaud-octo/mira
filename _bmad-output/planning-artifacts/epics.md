@@ -63,16 +63,22 @@
 **Objectif :** Compléter l'expérience utilisateur avec les vues manquantes et améliorer la lisibilité
 
 ### Story 4.1: Vue rétrospective de sprint
-**Statut [Sprint 2] :** 🔵 ready-for-dev
+**Statut [Sprint 2] :** ✅ Done
 
 ### Story 4.2: Filtrage par Epic sur le Board
-**Statut [Sprint 2] :** 🔵 ready-for-dev
+**Statut [Sprint 2] :** ✅ Done
 
 ### Story 4.3: Recherche globale (stories, epics)
-**Statut [Sprint 2] :** backlog
+**Statut :** ✅ Done
 
 ### Story 4.4: Indicateur de progression global en header
-**Statut [Sprint 2] :** backlog
+**Statut :** ✅ Done
+
+### Story 4.5: Liens d'ouverture VS Code sur les items du dashboard
+**Statut :** ✅ Done
+
+### Story 4.6: Ordonnancement des tickets dans Backlog et Ready for dev
+**Statut :** backlog
 
 ---
 
@@ -80,7 +86,7 @@
 **Objectif :** Améliorer le flux de travail avec le rechargement automatique et une meilleure DX
 
 ### Story 5.1: File watcher — rechargement auto quand les .md changent
-**Statut [Sprint 2] :** 🔵 ready-for-dev
+**Statut [Sprint 2] :** ✅ Done
 
 ### Story 5.2: Flag --watch pour activer le mode surveillance
 **Statut [Sprint 2] :** backlog

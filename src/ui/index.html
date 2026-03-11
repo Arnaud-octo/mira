@@ -18,12 +18,17 @@
     </div>
 
     <nav class="tabs" role="tablist">
-      <button class="tab active" data-tab="epics"  role="tab">Epics</button>
-      <button class="tab"        data-tab="board"  role="tab">Board</button>
+      <button class="tab"        data-tab="epics"  role="tab">Epics</button>
+      <button class="tab active" data-tab="board"  role="tab">Board</button>
       <button class="tab"        data-tab="sprint" role="tab">Sprint</button>
+      <button class="tab"        data-tab="retro"  role="tab" id="tab-btn-retro">Rétro</button>
     </nav>
 
     <div class="header-right">
+      <div class="search-wrap" id="search-wrap">
+        <input class="search-input" id="search-input" type="search" placeholder="Rechercher…" autocomplete="off" aria-label="Rechercher stories et epics" />
+        <div class="search-results hidden" id="search-results" role="listbox"></div>
+      </div>
       <span class="progress-pill" id="meta-progress"></span>
       <button class="btn-refresh" id="btn-refresh" title="Rafraîchir les données">↻</button>
     </div>
@@ -33,12 +38,12 @@
   <main class="main">
 
     <!-- Epics tab -->
-    <section id="tab-epics" class="tab-content active" role="tabpanel">
+    <section id="tab-epics" class="tab-content" role="tabpanel">
       <div id="epics-list" class="epics-list"></div>
     </section>
 
     <!-- Board tab -->
-    <section id="tab-board" class="tab-content" role="tabpanel">
+    <section id="tab-board" class="tab-content active" role="tabpanel">
       <div class="board-columns">
         <div class="board-col">
           <div class="col-header col-backlog">○ Backlog</div>
@@ -49,8 +54,16 @@
           <div class="col-cards" id="col-ready"></div>
         </div>
         <div class="board-col">
-          <div class="col-header col-progress">🟡 In progress</div>
+          <div class="col-header col-progress">🟡 Dev in progress</div>
           <div class="col-cards" id="col-in-progress"></div>
+        </div>
+        <div class="board-col">
+          <div class="col-header col-review">🟣 Review</div>
+          <div class="col-cards" id="col-review"></div>
+        </div>
+        <div class="board-col">
+          <div class="col-header col-qa">🟠 QA</div>
+          <div class="col-cards" id="col-qa"></div>
         </div>
         <div class="board-col">
           <div class="col-header col-done">✅ Done</div>
@@ -62,6 +75,11 @@
     <!-- Sprint tab -->
     <section id="tab-sprint" class="tab-content" role="tabpanel">
       <div id="sprint-view"></div>
+    </section>
+
+    <!-- Retro tab -->
+    <section id="tab-retro" class="tab-content" role="tabpanel">
+      <div id="retro-view"></div>
     </section>
 
   </main>
@@ -86,7 +104,9 @@
         <select class="status-select" id="modal-status">
           <option value="backlog">○ Backlog</option>
           <option value="ready-for-dev">🔵 Ready for dev</option>
-          <option value="in-progress">🟡 In progress</option>
+          <option value="in-progress">🟡 Dev in progress</option>
+          <option value="review">🟣 Review</option>
+          <option value="qa">🟠 QA</option>
           <option value="done">✅ Done</option>
         </select>
         <span class="save-indicator" id="save-indicator"></span>

@@ -1,6 +1,6 @@
 # Story 5.1: File watcher — rechargement automatique
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
